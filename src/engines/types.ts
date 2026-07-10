@@ -3,6 +3,8 @@ export type EngineKind = 'claude' | 'codex';
 export interface Usage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Provider-reported context window for the selected model. */
+  contextWindowTokens?: number;
 }
 
 /** Cumulative in-flight spend of one run — the Token Guard's raw material. */

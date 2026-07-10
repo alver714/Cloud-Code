@@ -478,6 +478,12 @@ export class SessionManager {
           summary.costUsd = ev.costUsd;
           summary.durationMs = ev.durationMs;
           summary.usage = ev.usage;
+          if (ev.usage) {
+            session.contextUsedTokens = ev.usage.inputTokens;
+            if (ev.usage.contextWindowTokens !== undefined) {
+              session.contextWindowTokens = ev.usage.contextWindowTokens;
+            }
+          }
         }
         if (ev.kind === 'error') {
           // A user-initiated /stop OR a Token Guard hard-stop kills the process;

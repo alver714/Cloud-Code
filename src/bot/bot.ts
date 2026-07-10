@@ -38,6 +38,7 @@ export const BOT_COMMANDS = [
   { command: 'diff', description: 'Показать git diff' },
   { command: 'engine', description: 'Сменить движок: claude|codex' },
   { command: 'model', description: 'Модель сессии' },
+  { command: 'context', description: 'Окно контекста и занятое место' },
   { command: 'usage', description: 'Лимиты подписок + расход бота + состояние VM' },
   { command: 'cleanup', description: 'Удалить неиспользуемые workspaces' },
   { command: 'budget', description: 'Лимит токенов на запуск: 500k|off|default' },

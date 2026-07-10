@@ -160,6 +160,12 @@ export async function* mapCodexEvents(
             ? {
                 inputTokens: numberOrUndefined(usage.input_tokens),
                 outputTokens: numberOrUndefined(usage.output_tokens),
+                contextWindowTokens:
+                  numberOrUndefined(usage.context_window) ??
+                  numberOrUndefined(usage.context_window_tokens) ??
+                  numberOrUndefined(ev.context_window) ??
+                  numberOrUndefined(ev.context_window_tokens) ??
+                  numberOrUndefined(ev.model_context_window),
               }
             : undefined,
         };

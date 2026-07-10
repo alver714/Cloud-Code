@@ -14,6 +14,9 @@ export interface Session {
   /** claude session_id / codex thread_id from the latest run. */
   engineSessionId?: string;
   model?: string;
+  /** Last provider-reported context occupancy for /context-window. */
+  contextUsedTokens?: number;
+  contextWindowTokens?: number;
   /** Output verbosity: false/undefined = compact, true = verbose progress. */
   verbose?: boolean;
   /**

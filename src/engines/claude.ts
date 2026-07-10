@@ -53,6 +53,7 @@ export class ClaudeEngine implements Engine {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export async function* mapClaudeEvents(src: JsonlSource): AsyncGenerator<AgentEvent, void, void> {
   let sawResult = false;
+  let initModel: string | undefined;
   const cum = {
     freshInputTokens: 0,
     cacheCreationTokens: 0,
@@ -69,6 +70,7 @@ export async function* mapClaudeEvents(src: JsonlSource): AsyncGenerator<AgentEv
     switch (ev.type) {
       case 'system':
         if (ev.subtype === 'init' && typeof ev.session_id === 'string') {
+          initModel = typeof ev.model === 'string' ? ev.model : undefined;
           yield {
             kind: 'init',
             engineSessionId: ev.session_id,
@@ -126,6 +128,12 @@ export async function* mapClaudeEvents(src: JsonlSource): AsyncGenerator<AgentEv
       case 'result': {
         sawResult = true;
         const ok = ev.subtype === 'success' && ev.is_error !== true;
+        const modelUsage = ev.modelUsage && typeof ev.modelUsage === 'object' ? ev.modelUsage : {};
+        const modelEntry =
+          (initModel && modelUsage[initModel]) ||
+          Object.values(modelUsage)
+            .filter((v: any) => v && typeof v === 'object' && typeof v.inputTokens === 'number')
+            .sort((a: any, b: any) => (b.inputTokens ?? 0) - (a.inputTokens ?? 0))[0];
         yield {
           kind: 'result',
           ok,
@@ -145,6 +153,7 @@ export async function* mapClaudeEvents(src: JsonlSource): AsyncGenerator<AgentEv
                   (numberOrUndefined(ev.usage.cache_creation_input_tokens) ?? 0) +
                   (numberOrUndefined(ev.usage.cache_read_input_tokens) ?? 0),
                 outputTokens: numberOrUndefined(ev.usage.output_tokens),
+                contextWindowTokens: numberOrUndefined(modelEntry?.contextWindow),
               }
             : undefined,
         };

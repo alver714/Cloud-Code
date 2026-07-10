@@ -65,6 +65,7 @@ describe('mapClaudeEvents (recorded fixtures)', () => {
     expect(result.ok).toBe(true);
     expect(result.text).toBe('DONE');
     expect(result.costUsd).toBeGreaterThan(0);
+    expect(result.usage?.contextWindowTokens).toBe(1_000_000);
     expect(events.every((e) => e.kind !== 'error')).toBe(true);
 
     // usage ticks: cumulative, one per API call, monotonically growing
