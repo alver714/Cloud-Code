@@ -242,11 +242,13 @@ export class TopicStreamer implements RunReporter {
     if (usage) parts.push(usage);
     // inputTokens = весь реплей контекста (вкл. кэш) — индикатор раздутой сессии
     const ctx = summary.usage?.inputTokens ?? 0;
-    if (ctx >= CTX_SHOW_THRESHOLD) parts.push(`контекст ~${formatTok(ctx)}`);
+    // это СУММА обработанного input за все шаги запуска (90%+ из кэша),
+    // а не размер context window — не путать
+    if (ctx >= CTX_SHOW_THRESHOLD) parts.push(`обработано ~${formatTok(ctx)} in`);
     let line = `✅ ${parts.join(' · ')}`;
     if (ctx >= CTX_RESET_HINT_THRESHOLD) {
       line +=
-        '\n💡 Контекст сессии сильно раздулся — /reset начнёт разговор заново (файлы останутся, историю перенесу).';
+        '\n💡 Запуск перелопатил много контекста — если сессия давно живёт, /reset начнёт разговор заново (файлы останутся, историю перенесу).';
     }
     return line;
   }
