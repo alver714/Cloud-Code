@@ -1,5 +1,14 @@
 # Cloud Code — Telegram bot for agentic coding in the cloud
 
+> **Do one thing and do it well.**
+> One channel (Telegram), one job (autonomous coding), done deeply — not twenty integrations done shallowly.
+
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Tests](https://img.shields.io/badge/tests-289%20passing-brightgreen)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+![Node](https://img.shields.io/badge/node-%E2%89%A522-339933)
+![Engines](https://img.shields.io/badge/engines-Claude%20Code%20%2B%20Codex-8a63d2)
+
 You write a prompt in Telegram → **Claude Code** or **Codex** runs autonomously on a GCP VM in a dedicated workspace, and the whole run — the agent's text, tool calls, commands and errors — streams back into the chat.
 
 - **Each topic in a forum group = a separate session.** Sessions run in parallel, each with its own workspace, queue and conversation context.
@@ -7,6 +16,10 @@ You write a prompt in Telegram → **Claude Code** or **Codex** runs autonomousl
 - **Two modes of operation.** You can connect an existing GitHub repository, create a new one, or open a plain agentic chat without a repository.
 - **Full autonomy.** Engines run with `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox`: the agent runs commands, edits files, commits and opens PRs on its own via an authorized `gh`.
 - **Resource and token control.** Before a run starts, subscription limits, memory, disk and egress are checked; Token Guard stops runaway runs.
+
+## Philosophy
+
+*Do one thing and do it well.* Cloud Code is not a everything-bridge. It picks **one channel** (Telegram — a mature mobile client you already have), **one job** (autonomous coding on your own cloud), and goes deep: a real verify loop (preview + CI + fix), subscription-aware spend discipline, cross-engine context, and a security posture treated as a feature rather than an afterthought — see [SECURITY.md](SECURITY.md). Focused, self-hosted, and yours.
 
 ## Architecture
 
