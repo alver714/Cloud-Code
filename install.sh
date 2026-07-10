@@ -34,7 +34,9 @@ npm install --no-audit --no-fund
 # The wizard is interactive; under `curl | bash` our stdin is the pipe, so
 # hand the wizard the real terminal.
 say "Starting the setup wizard…"
-if [ -e /dev/tty ]; then
+# A controlling terminal must be actually openable (it exists as a device node
+# even when there is none — check readability, not existence).
+if { : < /dev/tty; } 2>/dev/null; then
   npm run --silent setup < /dev/tty
 else
   warn "No interactive terminal detected. Finish setup manually:"
