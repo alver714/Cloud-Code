@@ -1,0 +1,33 @@
+{
+  "name": "cloud-code-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram bot for agentic cloud coding via Claude Code and Codex CLIs",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "setup": "tsx src/setup/wizard.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "engine-cli": "tsx src/engines/harness.ts",
+    "codex-appserver-probe": "tsx src/engines/appserver-probe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
+    "dotenv": "^17.4.2",
+    "grammy": "^1.44.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

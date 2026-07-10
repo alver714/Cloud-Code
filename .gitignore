@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+sessions.json
+.env*
+!.env.example
+auth.json
+.env.bak

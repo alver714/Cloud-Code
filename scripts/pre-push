@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Local pre-push guard: block pushes that add secret-shaped strings.
+# Install: cp scripts/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# (or run scripts/install-hooks.sh)
+PATTERN='[0-9]{8,}:AA[A-Za-z0-9_-]{30,}|sk-ant-(oat|api)[0-9]{2}-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+# Lines that are obviously synthetic test fixtures are allowed through.
+FAKE='FAKE|EXAMPLE|DUMMY|PLACEHOLDER|SYNTHETIC|SAMPLE|[0Xx]{8,}'
+ZERO='0000000000000000000000000000000000000000'
+
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue
+  if [ "$remote_sha" = "$ZERO" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  commits="$(git rev-list "$range" 2>/dev/null)"
+  [ -z "$commits" ] && continue
+  hits="$(git grep -InE "$PATTERN" $commits -- . ':(exclude)scripts/pre-push' ':(exclude).github/*' 2>/dev/null | grep -viE "$FAKE" || true)"
+  if [ -n "$hits" ]; then
+    echo "❌ pre-push: a real-looking secret was found in the commits you're pushing:" >&2
+    echo "$hits" | sed -E 's/(:.{40}).*/\1…/' | head >&2
+    echo "   If it's a test fixture, use an obviously synthetic value (FAKE…/EXAMPLE…/0000…)." >&2
+    exit 1
+  fi
+done
+exit 0
