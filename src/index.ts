@@ -10,7 +10,7 @@ import { CodexEngine } from './engines/codex.js';
 import { CodexAppServerEngine } from './engines/codex-appserver.js';
 import { AppServerClient } from './engines/appserver.js';
 import type { Engine, EngineKind } from './engines/types.js';
-import { makeClaudeExtractor } from './memory/extract.js';
+import { makeModelExtractor } from './memory/extract.js';
 import { MemoryStore } from './memory/store.js';
 import { goalRestartNotice, SessionManager, type WindowReader } from './sessions/manager.js';
 import { SessionStore } from './sessions/store.js';
@@ -170,16 +170,20 @@ async function main(): Promise<void> {
         readDisk,
         readEgress,
       },
-      // Cross-session memory: injected summary + opportunistic extraction via a
-      // dedicated cheap claude-haiku call (bot secrets stripped from its env).
+      // Cross-session memory: Haiku when Claude credentials are connected,
+      // otherwise GPT-5.4 mini through the Codex CLI's own auth.
       memory: {
         enabled: cfg.botMemory,
         store: memoryStore,
-        extract: makeClaudeExtractor(new ClaudeEngine(), {
+        extract: makeModelExtractor(new ClaudeEngine(), {
           model: 'haiku',
-          // Claude needs its own OAuth token; bot secrets + codex key stripped.
           env: sanitizedChildEnv({ keepClaude: true }),
           neutralCwd: memExtractDir,
+          fallback: {
+            engine: new CodexEngine(),
+            model: 'gpt-5.4-mini',
+            env: sanitizedChildEnv({ keepCodex: true }),
+          },
         }),
       },
     },

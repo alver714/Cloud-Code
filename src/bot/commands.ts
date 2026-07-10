@@ -11,6 +11,7 @@ import type { EngineKind } from '../engines/types.js';
 import {
   cloneRepo,
   createRepo,
+  gitCommitAll,
   gitDiff,
   gitStatusShort,
   initChatWorkdir,
@@ -201,6 +202,7 @@ export const HELP_FULL = `📚 <b>All Cloud Code commands</b>
 /preview [port] [command] — dev server + public link (stop|status)
 /ci — status of the last CI run (after a push the bot watches on its own)
 /status — session state + git status
+/commit &lt;message&gt; — stage all changes and create a local commit
 /diff — current git diff
 
 <b>System</b>
@@ -1863,6 +1865,38 @@ export function registerCommands(bot: Bot, deps: BotDeps): void {
       }
     } catch (err) {
       await reply(ctx, `❌ git diff failed:\n<pre>${truncateHtml(escapeHtml(String(err)), 800)}</pre>`);
+    }
+  });
+
+  bot.command('commit', async (ctx) => {
+    const s = requireSession(ctx, deps);
+    if (!s) return;
+    const message = ctx.match.trim();
+    if (!message) {
+      await reply(
+        ctx,
+        'Format: <code>/commit &lt;message&gt;</code> — commits all current changes without pushing.',
+      );
+      return;
+    }
+    if (s.status === 'running' || manager.queueLength(s.chatId, s.topicId) > 0) {
+      await reply(
+        ctx,
+        '⏳ The agent is still working or has queued work. Wait for it to finish, then run /commit.',
+      );
+      return;
+    }
+    try {
+      const result = await gitCommitAll(s.workdir, message);
+      await reply(
+        ctx,
+        `✅ Committed <code>${escapeHtml(result.sha)}</code> — ${escapeHtml(result.subject)}\nNot pushed.`,
+      );
+    } catch (err) {
+      await reply(
+        ctx,
+        `❌ Commit failed:\n<pre>${truncateHtml(escapeHtml(String(err instanceof Error ? err.message : err)), 1200)}</pre>`,
+      );
     }
   });
 

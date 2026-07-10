@@ -115,6 +115,34 @@ export async function gitDiff(workdir: string): Promise<{ stat: string; diff: st
   return { stat: stat.trim(), diff: diff.trim() };
 }
 
+export interface GitCommitResult {
+  sha: string;
+  subject: string;
+}
+
+/** Stage every workspace change (including deletions and untracked files) and commit it. */
+export async function gitCommitAll(workdir: string, message: string): Promise<GitCommitResult> {
+  const subject = message.trim();
+  if (!subject) throw new Error('Commit message must not be empty.');
+
+  const opts = { timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: childEnv() };
+  const { stdout: status } = await execFileAsync(
+    'git',
+    ['-C', workdir, 'status', '--porcelain'],
+    opts,
+  );
+  if (!status.trim()) throw new Error('Nothing to commit — the working tree is clean.');
+
+  await execFileAsync('git', ['-C', workdir, 'add', '-A'], opts);
+  await execFileAsync('git', ['-C', workdir, 'commit', '-m', subject], opts);
+  const { stdout: sha } = await execFileAsync(
+    'git',
+    ['-C', workdir, 'rev-parse', '--short', 'HEAD'],
+    opts,
+  );
+  return { sha: sha.trim(), subject };
+}
+
 /** Directory name for a session workspace: owner-repo-topicId. */
 export function workdirName(nameWithOwner: string, topicId: number): string {
   const safe = nameWithOwner.replace('/', '-').replace(/[^A-Za-z0-9._-]/g, '_');

@@ -38,6 +38,7 @@ export const BOT_COMMANDS = [
   { command: 'preview', description: 'Live preview: dev server + public link' },
   { command: 'stop', description: 'Stop the current run' },
   { command: 'diff', description: 'Show git diff' },
+  { command: 'commit', description: 'Commit all changes: /commit message' },
   { command: 'engine', description: 'Switch engine: claude|codex' },
   { command: 'model', description: 'Session model' },
   { command: 'effort', description: 'Reasoning effort: low|medium|high|xhigh|max|default' },

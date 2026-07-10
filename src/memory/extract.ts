@@ -245,7 +245,7 @@ function truncate(s: string, max: number): string {
 /** ~30s ceiling: a stuck extraction must never linger against the free tier. */
 const EXTRACT_TIMEOUT_MS = 45_000;
 
-export interface ClaudeExtractorOptions {
+export interface ModelExtractorOptions {
   /** Small, cheap model for extraction (default 'haiku'). */
   model?: string;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -261,56 +261,94 @@ export interface ClaudeExtractorOptions {
    * the CLI has no flag to run a pure no-tools text pass.
    */
   neutralCwd?: string;
+  /** Used only when the primary engine cannot complete (for example, it is not authenticated). */
+  fallback?: {
+    engine: Engine;
+    model: string;
+    env?: NodeJS.ProcessEnv;
+  };
 }
 
 /**
- * Wire a real FactExtractor onto a (cheap) claude Engine: one fresh, un-resumed
+ * Wire a real FactExtractor onto a cheap Engine: one fresh, un-resumed
  * headless run with a small model + low effort, in a neutral cwd (see
- * ClaudeExtractorOptions.neutralCwd). The result text is parsed into facts.
+ * ModelExtractorOptions.neutralCwd). The result text is parsed into facts.
  * Any error / timeout resolves to [].
  */
-export function makeClaudeExtractor(engine: Engine, opts: ClaudeExtractorOptions = {}): FactExtractor {
+export function makeModelExtractor(engine: Engine, opts: ModelExtractorOptions = {}): FactExtractor {
   const timeoutMs = opts.timeoutMs ?? EXTRACT_TIMEOUT_MS;
   return async ({ userPrompt, resultText, workdir }) => {
     const prompt = buildExtractionPrompt(userPrompt, resultText);
-    let run: ReturnType<Engine['run']>;
-    try {
-      run = engine.run({
-        prompt,
-        workdir: opts.neutralCwd ?? workdir,
-        model: opts.model ?? 'haiku',
-        effort: opts.effort ?? 'low',
-        env: opts.env,
-      });
-    } catch {
-      return [];
-    }
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), timeoutMs);
-    });
-    try {
-      const collect = (async (): Promise<string> => {
-        let text = '';
-        for await (const ev of run.events) {
-          if (ev.kind === 'result' && ev.ok) text = ev.text;
-        }
-        return text;
-      })();
-      const winner = await Promise.race([collect, timeout]);
-      if (winner === 'timeout') {
-        try {
-          run.cancel();
-        } catch {
-          /* ignore */
-        }
-        return [];
-      }
-      return parseExtractedFacts(winner);
-    } catch {
-      return [];
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const cwd = opts.neutralCwd ?? workdir;
+    const effort = opts.effort ?? 'low';
+    const primary = await runExtractor(
+      engine,
+      prompt,
+      cwd,
+      opts.model ?? 'haiku',
+      effort,
+      opts.env,
+      timeoutMs,
+    );
+    if (primary.ok) return primary.facts;
+    if (!opts.fallback) return [];
+    const fallback = await runExtractor(
+      opts.fallback.engine,
+      prompt,
+      cwd,
+      opts.fallback.model,
+      effort,
+      opts.fallback.env,
+      timeoutMs,
+    );
+    return fallback.ok ? fallback.facts : [];
   };
+}
+
+async function runExtractor(
+  engine: Engine,
+  prompt: string,
+  workdir: string,
+  model: string,
+  effort: string,
+  env: NodeJS.ProcessEnv | undefined,
+  timeoutMs: number,
+): Promise<{ ok: boolean; facts: ExtractedFact[] }> {
+  let run: ReturnType<Engine['run']>;
+  try {
+    run = engine.run({ prompt, workdir, model, effort, env });
+  } catch {
+    return { ok: false, facts: [] };
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  try {
+    const collect = (async (): Promise<{ ok: boolean; text: string }> => {
+      let text = '';
+      let ok = false;
+      for await (const ev of run.events) {
+        if (ev.kind === 'result') {
+          ok = ev.ok;
+          if (ev.ok) text = ev.text;
+        }
+      }
+      return { ok, text };
+    })();
+    const winner = await Promise.race([collect, timeout]);
+    if (winner === 'timeout') {
+      try {
+        run.cancel();
+      } catch {
+        /* ignore */
+      }
+      return { ok: false, facts: [] };
+    }
+    return { ok: winner.ok, facts: winner.ok ? parseExtractedFacts(winner.text) : [] };
+  } catch {
+    return { ok: false, facts: [] };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

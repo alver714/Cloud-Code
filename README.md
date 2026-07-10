@@ -157,7 +157,7 @@ Raw JSONL engine logs are stored in `~/logs/session-*.jsonl`.
 | `/review [focus]` | code review of the current changes (native `/review` for Claude, a crafted prompt for Codex) |
 | `/init` | create an instructions file for the agent (`CLAUDE.md` for Claude, `AGENTS.md` for Codex) |
 | `/memory` | show the repository's instructions file (`CLAUDE.md` / `AGENTS.md`) |
-| `/memories [add\|forget]` | the bot's memory: durable facts about you/projects, accumulated across sessions (cheaply extracted with haiku, injected as a digest into new runs; `BOT_MEMORY=off` disables it) |
+| `/memories [add\|forget]` | the bot's memory: durable facts about you/projects, accumulated across sessions (extracted with Haiku, or GPT-5.4 mini when Claude isn't connected; `BOT_MEMORY=off` disables it) |
 | `/skills` | available skills: repository (`.claude/skills`) and global |
 | `/mcp` | connected MCP servers for both engines |
 | `/usage` | percentage of the 5-hour/weekly windows for both subscriptions + the bot's spend for today |
