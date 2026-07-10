@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { isValidRepo, workdirName } from '../src/github/gh.js';
+import { isValidNewRepoName, isValidRepo, workdirName } from '../src/github/gh.js';
+
+describe('isValidNewRepoName', () => {
+  it('accepts bare names and full slugs', () => {
+    expect(isValidNewRepoName('my-new-project')).toBe(true);
+    expect(isValidNewRepoName('bot_2.0')).toBe(true);
+    expect(isValidNewRepoName('alver714/my-new-project')).toBe(true);
+  });
+
+  it('rejects traversal, empty and multi-segment names', () => {
+    expect(isValidNewRepoName('')).toBe(false);
+    expect(isValidNewRepoName('.')).toBe(false);
+    expect(isValidNewRepoName('..')).toBe(false);
+    expect(isValidNewRepoName('../evil')).toBe(false);
+    expect(isValidNewRepoName('a/b/c')).toBe(false);
+    expect(isValidNewRepoName('имя-кириллицей')).toBe(false);
+  });
+});
 
 describe('isValidRepo', () => {
   it('accepts a normal owner/repo slug', () => {

@@ -40,6 +40,44 @@ export async function listRepos(limit = 30): Promise<string[]> {
   return parsed.map((r) => r.nameWithOwner ?? '').filter((r) => isValidRepo(r));
 }
 
+/** Bare repo name for /create (no owner) — or a full owner/repo slug. */
+export function isValidNewRepoName(name: string): boolean {
+  if (name.includes('/')) return isValidRepo(name);
+  return /^[A-Za-z0-9_.-]+$/.test(name) && name !== '.' && name !== '..';
+}
+
+let cachedLogin: string | undefined;
+
+/** GitHub login of the authenticated gh user (cached for the process). */
+export async function ghLogin(): Promise<string> {
+  if (cachedLogin) return cachedLogin;
+  const { stdout } = await execFileAsync('gh', ['api', 'user', '-q', '.login'], {
+    timeout: 15_000,
+    env: childEnv(),
+  });
+  cachedLogin = stdout.trim();
+  if (!cachedLogin) throw new Error('gh api user вернул пустой login');
+  return cachedLogin;
+}
+
+/**
+ * Creates a new GitHub repo (with a README so the clone has a default
+ * branch) and returns its full owner/repo slug.
+ */
+export async function createRepo(
+  name: string,
+  visibility: 'private' | 'public',
+): Promise<string> {
+  if (!isValidNewRepoName(name)) throw new Error(`Некорректное имя репозитория: ${name}`);
+  const full = name.includes('/') ? name : `${await ghLogin()}/${name}`;
+  await execFileAsync(
+    'gh',
+    ['repo', 'create', full, `--${visibility}`, '--add-readme'],
+    { timeout: 60_000, env: childEnv() },
+  );
+  return full;
+}
+
 /** Clones owner/repo into dest; reuses dest if it already exists. */
 export async function cloneRepo(nameWithOwner: string, dest: string): Promise<'cloned' | 'reused'> {
   if (!isValidRepo(nameWithOwner)) throw new Error(`Некорректное имя репозитория: ${nameWithOwner}`);

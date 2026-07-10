@@ -30,6 +30,7 @@ export function setupBot(bot: Bot, deps: BotDeps): void {
 
 export const BOT_COMMANDS = [
   { command: 'new', description: 'Новая сессия: /new owner/repo [claude|codex]' },
+  { command: 'create', description: 'Новый репозиторий с нуля + сессия' },
   { command: 'repos', description: 'Выбрать репозиторий из GitHub' },
   { command: 'sessions', description: 'Список всех сессий' },
   { command: 'status', description: 'Состояние сессии и git status' },
