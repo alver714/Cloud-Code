@@ -1,9 +1,12 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
+import { promisify } from 'node:util';
 import { sanitizedChildEnv } from '../util/childEnv.js';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Live preview for a session: a managed dev-server process plus a Cloudflare
@@ -187,6 +190,38 @@ function isPortOpen(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * Resolves the working directory of the process currently listening on
+ * `port` (Linux only, via `ss` + `/proc/<pid>/cwd`) — used to make sure a
+ * "port is already listening, just tunnel it" reuse actually belongs to the
+ * requesting session and not to another topic's server that happens to be
+ * bound to the same common dev port on this shared VM. Returns undefined
+ * when the owner can't be determined (missing tools, permissions, macOS…),
+ * in which case callers fall back to trusting the port as before.
+ */
+async function portOwnerCwd(port: number): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync('ss', ['-H', '-ltnp', `sport = :${port}`], {
+      timeout: 3000,
+    });
+    const m = /pid=(\d+)/.exec(stdout);
+    if (!m) return undefined;
+    return await fs.realpath(`/proc/${m[1]}/cwd`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when `port`'s listener's cwd could be confirmed to belong to `workdir`. */
+async function isPortOwnedByWorkdir(port: number, workdir: string): Promise<boolean> {
+  const [owner, workdirReal] = await Promise.all([
+    portOwnerCwd(port),
+    fs.realpath(workdir).catch(() => path.resolve(workdir)),
+  ]);
+  if (owner === undefined) return true; // can't tell — don't block a legitimate reuse
+  return owner === workdirReal;
+}
+
 async function waitForPort(port: number, timeoutMs: number, aborted: () => boolean): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -323,15 +358,25 @@ export class PreviewManager {
     let servesWholeDir = false;
 
     if (!command) {
-      // 1) An explicitly named port that already answers → just tunnel it.
+      // 1) An explicitly named port that already answers → just tunnel it,
+      // but only if it's actually this session's workdir and not another
+      // topic's server that happens to be bound to the same port.
       if (port !== undefined && (await isPortOpen(port))) {
-        serverLabel = `port ${port} was already listening`;
+        if (await isPortOwnedByWorkdir(port, req.workdir)) {
+          serverLabel = `port ${port} was already listening`;
+        } else {
+          throw new Error(
+            `Port ${port} is already in use by another session's server (different workspace) — refusing to preview it. Pick a different port.`,
+          );
+        }
       }
       // 2) Bare /preview → find a server the agent already started.
       if (serverLabel === undefined && port === undefined) {
         const listening: number[] = [];
         for (const p of COMMON_DEV_PORTS) {
-          if (await isPortOpen(p)) listening.push(p);
+          if ((await isPortOpen(p)) && (await isPortOwnedByWorkdir(p, req.workdir))) {
+            listening.push(p);
+          }
         }
         if (listening.length > 0) {
           port = listening[0]!;
@@ -393,6 +438,15 @@ export class PreviewManager {
     }
 
     if (serverLabel === undefined) {
+      // The port may already be occupied by an unrelated process (e.g.
+      // another topic's dev server) — spawning ours would just fail to bind
+      // while waitForPort below still sees the port as "open" and falsely
+      // reports success, tunnelling someone else's server.
+      if (await isPortOpen(port)) {
+        throw new Error(
+          `Port ${port} is already in use by another process and isn't this session's server — refusing to preview it. Pick a different port.`,
+        );
+      }
       serverLabel = command!;
       serverProc = spawn('bash', ['-lc', command!], {
         cwd: req.workdir,
