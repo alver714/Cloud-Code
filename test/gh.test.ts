@@ -1,5 +1,22 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { isValidNewRepoName, isValidRepo, workdirName } from '../src/github/gh.js';
+import { initChatWorkdir, isValidNewRepoName, isValidRepo, workdirName } from '../src/github/gh.js';
+
+describe('initChatWorkdir', () => {
+  it('creates a git-initialized sandbox (codex requires a repo)', async () => {
+    const dir = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'chat-ws-')), 'chat-1');
+    try {
+      await initChatWorkdir(dir);
+      const gitStat = await fs.stat(path.join(dir, '.git'));
+      expect(gitStat.isDirectory()).toBe(true);
+      await initChatWorkdir(dir); // idempotent — re-init must not throw
+    } finally {
+      await fs.rm(path.dirname(dir), { recursive: true, force: true });
+    }
+  });
+});
 
 describe('isValidNewRepoName', () => {
   it('accepts bare names and full slugs', () => {

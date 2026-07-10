@@ -40,6 +40,15 @@ export async function listRepos(limit = 30): Promise<string[]> {
   return parsed.map((r) => r.nameWithOwner ?? '').filter((r) => isValidRepo(r));
 }
 
+/**
+ * Workspace for a repo-less /chat session: empty dir with git init
+ * (codex exec отказывается работать вне git-репозитория).
+ */
+export async function initChatWorkdir(dir: string): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  await execFileAsync('git', ['init', '-q', dir], { timeout: 15_000, env: childEnv() });
+}
+
 /** Bare repo name for /create (no owner) — or a full owner/repo slug. */
 export function isValidNewRepoName(name: string): boolean {
   if (name.includes('/')) return isValidRepo(name);
