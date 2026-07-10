@@ -1,5 +1,6 @@
 import { InlineKeyboard, type Bot, type Context } from 'grammy';
 import { fmtResetTime, getTopicId, reply, sendRepoKeyboard, type BotDeps } from './commands.js';
+import { buildTopicTitle, modelTitle, topicTitleBase } from './topic-title.js';
 
 /**
  * Prompts blocked by a confirm-with-button pre-flight gate (subscription window
@@ -122,6 +123,16 @@ export function registerTopicHandlers(bot: Bot, deps: BotDeps): void {
     if (!session) {
       await sendRepoKeyboard(ctx, "Topic isn't bound to a repository. Pick one:");
       return;
+    }
+
+    // The first real prompt gives the topic its durable human-readable name.
+    if (!session.topicTitleBase && (session.history?.length ?? 0) === 0) {
+      session.topicTitleBase = topicTitleBase(text);
+      session.name = buildTopicTitle(session.topicTitleBase, modelTitle(session));
+      await store.upsert(session);
+      await ctx.api
+        .editForumTopic(ctx.chat.id, topicId, { name: session.name })
+        .catch((err) => console.error(`[topic] rename failed for ${topicId}:`, err));
     }
 
     // Unknown slash-commands intentionally fall through to the engine

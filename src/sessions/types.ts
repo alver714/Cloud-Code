@@ -34,6 +34,8 @@ export interface Session {
   chatId: number;
   topicId: number;
   name: string;
+  /** First user prompt, used as the stable part of the dynamic Telegram topic title. */
+  topicTitleBase?: string;
   engine: EngineKind;
   /** owner/repo */
   repoUrl: string;

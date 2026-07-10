@@ -56,6 +56,7 @@ import {
   truncateHtml,
 } from './format.js';
 import { sanitizedChildEnv } from '../util/childEnv.js';
+import { buildTopicTitle, modelTitle } from './topic-title.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -734,6 +735,7 @@ async function crossEngineHandoff(
   s.contextWindowTokens = undefined;
   s.pendingContext = buildPendingContext(s.history);
   await store.upsert(s);
+  await refreshTopicModel(ctx, store, s);
   await reply(
     ctx,
     `🔁 Engine: <b>${escapeHtml(targetEngine)}</b>, model: <b>${escapeHtml(model ?? 'CLI default')}</b>. ` +
@@ -753,9 +755,20 @@ async function setSameEngineModel(
   s.contextUsedTokens = undefined;
   s.contextWindowTokens = undefined;
   await store.upsert(s);
+  await refreshTopicModel(ctx, store, s);
   const shown = escapeHtml(name ?? 'CLI default');
   const note = unknown ? ' (unknown model — I\'ll pass it to the engine as-is)' : '';
   await reply(ctx, `Model: <b>${shown}</b> — context preserved, applies from the next prompt${note}.`);
+}
+
+/** Keep the first-prompt title, replacing only its model suffix. */
+async function refreshTopicModel(ctx: Context, store: SessionStore, s: Session): Promise<void> {
+  if (!s.topicTitleBase || !ctx.chat) return;
+  s.name = buildTopicTitle(s.topicTitleBase, modelTitle(s));
+  await store.upsert(s);
+  await ctx.api
+    .editForumTopic(s.chatId, s.topicId, { name: s.name })
+    .catch((err) => console.error(`[topic] rename failed for ${s.topicId}:`, err));
 }
 
 async function sendModelKeyboard(ctx: Context, s: Session): Promise<void> {
