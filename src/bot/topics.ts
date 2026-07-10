@@ -1,10 +1,10 @@
-import { InlineKeyboard, type Bot } from 'grammy';
+import { InlineKeyboard, type Bot, type Context } from 'grammy';
 import { fmtResetTime, getTopicId, reply, sendRepoKeyboard, type BotDeps } from './commands.js';
 
 /**
- * Prompts blocked by the pre-flight subscription-window gate, awaiting a
- * user "force". Keyed by `chatId:topicId`, single-slot (a newer block for the
- * same topic replaces the older pending prompt).
+ * Prompts blocked by a confirm-with-button pre-flight gate (subscription window
+ * OR egress budget), awaiting a user "force". Keyed by `chatId:topicId`,
+ * single-slot (a newer block for the same topic replaces the older prompt).
  */
 const pendingForced = new Map<string, string>();
 const PENDING_MAX = 100;
@@ -16,6 +16,24 @@ function rememberPending(chatId: number, topicId: number, prompt: string): void 
     if (oldest === undefined) break;
     pendingForced.delete(oldest);
   }
+}
+
+/**
+ * Shared confirm flow for every "soft" pre-flight block: remember the prompt so
+ * the 🚀 force callback can resubmit it, and show the same 🚀/✋ keyboard.
+ */
+async function sendForceConfirm(
+  ctx: Context,
+  chatId: number,
+  topicId: number,
+  prompt: string,
+  text: string,
+): Promise<void> {
+  rememberPending(chatId, topicId, prompt);
+  const kb = new InlineKeyboard()
+    .text('🚀 Запустить', `force:${topicId}`)
+    .text('✋ Отмена', `forcecancel:${topicId}`);
+  await reply(ctx, text, { reply_markup: kb });
 }
 
 /** Prompt routing + topic lifecycle. Register AFTER registerCommands. */
@@ -101,13 +119,29 @@ export function registerTopicHandlers(bot: Bot, deps: BotDeps): void {
     } else if (res.status === 'limit-blocked') {
       const pct = Math.round(res.usedPercent);
       const resetPart = res.resetsAt ? ` (сброс ${fmtResetTime(res.resetsAt)})` : '';
-      rememberPending(ctx.chat.id, topicId, text);
-      const kb = new InlineKeyboard()
-        .text('🚀 Запустить', `force:${topicId}`)
-        .text('✋ Отмена', `forcecancel:${topicId}`);
-      await reply(ctx, `⚠️ Окно подписки заполнено на ${pct}%${resetPart}. Всё равно запустить?`, {
-        reply_markup: kb,
-      });
+      await sendForceConfirm(
+        ctx,
+        ctx.chat.id,
+        topicId,
+        text,
+        `⚠️ Окно подписки заполнено на ${pct}%${resetPart}. Всё равно запустить?`,
+      );
+    } else if (res.status === 'egress-blocked') {
+      await sendForceConfirm(
+        ctx,
+        ctx.chat.id,
+        topicId,
+        text,
+        `🌐 Исходящий трафик VM: ${res.usedMb} MB из ${res.freeMb} бесплатных (${res.usedPct}%). ` +
+          'Сверх лимита ~$0.12/ГБ. Запустить?',
+      );
+    } else if (res.status === 'resource-blocked') {
+      await reply(
+        ctx,
+        res.reason === 'memory'
+          ? `⏳ Мало памяти на VM (осталось ${res.detail} MB) — подожди завершения текущего запуска`
+          : `💾 Диск почти полон (${res.detail}%) — почисти workspaces: /cleanup`,
+      );
     }
   });
 }

@@ -9,6 +9,7 @@ import { CodexEngine } from './engines/codex.js';
 import type { EngineKind } from './engines/types.js';
 import { SessionManager, type WindowReader } from './sessions/manager.js';
 import { SessionStore } from './sessions/store.js';
+import { readDisk, readEgress, readMemory } from './system/resources.js';
 import { UsageAccounting } from './usage/accounting.js';
 import { readClaudeLimits, readCodexLimits } from './usage/limits.js';
 import { createBot, setupBot, BOT_COMMANDS } from './bot/bot.js';
@@ -79,6 +80,17 @@ async function main(): Promise<void> {
       preflightPct: cfg.guardPreflightPct,
       readWindow,
       accounting,
+      resource: {
+        enabled: cfg.resourceGuard,
+        diskPath: cfg.workspacesDir,
+        minFreeMemMb: cfg.minFreeMemMb,
+        diskBlockPct: cfg.diskBlockPct,
+        egressFreeMb: cfg.egressFreeMb,
+        egressWarnPct: cfg.egressWarnPct,
+        readMemory,
+        readDisk,
+        readEgress,
+      },
     },
   );
 

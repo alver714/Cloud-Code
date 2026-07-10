@@ -8,11 +8,11 @@ if GC compute instances describe "$VM_NAME" --zone="$GCP_ZONE" >/dev/null 2>&1; 
 else
   GC compute instances create "$VM_NAME" \
     --zone="$GCP_ZONE" \
-    --machine-type=e2-standard-2 \
+    --machine-type="$MACHINE_TYPE" \
     --image-family=ubuntu-2404-lts-amd64 \
     --image-project=ubuntu-os-cloud \
-    --boot-disk-size=50GB \
-    --boot-disk-type=pd-balanced
+    --boot-disk-size="$BOOT_DISK_SIZE" \
+    --boot-disk-type="$BOOT_DISK_TYPE"
 fi
 
 echo

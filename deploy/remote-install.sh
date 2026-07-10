@@ -2,9 +2,26 @@
 # Выполняется НА VM (стрим через 02-install.sh). Идемпотентен.
 set -euo pipefail
 
+echo "== swap (обязателен на e2-micro: 1GB RAM) =="
+if ! sudo swapon --show | grep -q /swapfile; then
+  sudo fallocate -l 3G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  echo 'vm.swappiness=20' | sudo tee /etc/sysctl.d/99-swap.conf >/dev/null
+  sudo sysctl -p /etc/sysctl.d/99-swap.conf
+fi
+free -h | head -3
+
 echo "== apt base =="
 sudo apt-get update -q
-sudo apt-get install -yq git build-essential curl ca-certificates
+sudo apt-get install -yq git build-essential curl ca-certificates vnstat
+
+echo "== vnstat (учёт egress для Resource Guard) =="
+# идемпотентно: enable --now переустановит юнит и запустит демон при необходимости
+sudo systemctl enable --now vnstat
+systemctl is-active vnstat || true
 
 echo "== node 22 LTS =="
 if command -v node >/dev/null; then

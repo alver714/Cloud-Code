@@ -11,10 +11,15 @@ if [[ -z "$GCP_PROJECT" || "$GCP_PROJECT" == "(unset)" ]]; then
   exit 1
 fi
 
+# Free tier: e2-micro доступен бесплатно только в us-west1 / us-central1 / us-east1
 GCP_ZONE="${GCP_ZONE:-$(gcloud config get-value compute/zone 2>/dev/null || true)}"
 if [[ -z "$GCP_ZONE" || "$GCP_ZONE" == "(unset)" ]]; then
-  GCP_ZONE="europe-west1-b"
+  GCP_ZONE="us-central1-a"
 fi
+
+MACHINE_TYPE="${MACHINE_TYPE:-e2-micro}"      # Always Free
+BOOT_DISK_SIZE="${BOOT_DISK_SIZE:-30GB}"      # Always Free: до 30GB pd-standard
+BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-pd-standard}"
 
 GC() {
   gcloud --project "$GCP_PROJECT" "$@"

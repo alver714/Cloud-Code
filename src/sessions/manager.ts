@@ -7,6 +7,7 @@ import type {
   Usage,
   UsageTick,
 } from '../engines/types.js';
+import type { DiskInfo, EgressInfo, MemoryInfo } from '../system/resources.js';
 import type { UsageAccounting } from '../usage/accounting.js';
 import { RunGuard, workTokens, type RunGuardConfig } from './guard.js';
 import { SessionStore } from './store.js';
@@ -45,7 +46,11 @@ export type WindowReader = (engine: EngineKind) => Promise<WindowUsage | null>;
 export type SubmitResult =
   | { status: 'started' }
   | { status: 'queued'; position: number }
-  | { status: 'limit-blocked'; usedPercent: number; resetsAt?: number };
+  | { status: 'limit-blocked'; usedPercent: number; resetsAt?: number }
+  /** Hard resource stop — no force button (memory too low / disk almost full). */
+  | { status: 'resource-blocked'; reason: 'memory' | 'disk'; detail: string }
+  /** Egress near the free-tier budget — confirm-with-button (like limit-blocked). */
+  | { status: 'egress-blocked'; usedMb: number; freeMb: number; usedPct: number };
 
 export interface SubmitOptions {
   /** Skip the pre-flight subscription-window gate (a user-confirmed force). */
@@ -63,6 +68,28 @@ interface PendingJob {
   prompt: string;
 }
 
+/**
+ * Resource Guard wiring for the pre-flight gates. Collectors are injected (same
+ * DI style as readWindow) so tests can stub them; each fails open (null).
+ */
+export interface ResourceGuardOptions {
+  /** RESOURCE_GUARD — false skips all resource gates entirely. */
+  enabled: boolean;
+  /** Filesystem to statfs for the disk gate (the workspaces dir). */
+  diskPath: string;
+  /** Combined MemAvailable+SwapFree below this (MB) hard-blocks a start. */
+  minFreeMemMb: number;
+  /** Disk usedPct ≥ this hard-blocks a start. */
+  diskBlockPct: number;
+  /** Free monthly egress budget (MB). */
+  egressFreeMb: number;
+  /** Egress ≥ this percent of the budget triggers a confirm-with-button. */
+  egressWarnPct: number;
+  readMemory: () => Promise<MemoryInfo | null>;
+  readDisk: (dirPath: string) => Promise<DiskInfo | null>;
+  readEgress: () => Promise<EgressInfo | null>;
+}
+
 export interface ManagerOptions {
   logsDir: string;
   maxConcurrentRuns: number;
@@ -75,10 +102,20 @@ export interface ManagerOptions {
   readWindow?: WindowReader;
   /** Per-day spend accounting, updated at run end. */
   accounting?: UsageAccounting;
+  /** Resource Guard collectors + thresholds; omitted = no resource gates. */
+  resource?: ResourceGuardOptions;
 }
 
 const PREFLIGHT_CACHE_MS = 60_000;
 const PREFLIGHT_TIMEOUT_MS = 3_000;
+const RESOURCE_CACHE_MS = 30_000;
+
+interface ResourceSnapshot {
+  at: number;
+  mem: MemoryInfo | null;
+  disk: DiskInfo | null;
+  egress: EgressInfo | null;
+}
 
 const HISTORY_MAX_ENTRIES = 20;
 const HISTORY_MAX_CHARS = 24_000;
@@ -118,6 +155,8 @@ export class SessionManager {
   private readonly pending: PendingJob[] = [];
   /** Pre-flight window reads, cached briefly so we don't hammer the app-server. */
   private readonly windowCache = new Map<EngineKind, { at: number; value: WindowUsage | null }>();
+  /** Resource collector reads, cached 30s (shared across the memory/disk/egress gates). */
+  private resourceCache?: ResourceSnapshot;
 
   constructor(
     private readonly store: SessionStore,
@@ -149,16 +188,66 @@ export class SessionManager {
       this.pending.push({ key, prompt });
       return { status: 'queued', position: this.pending.filter((j) => j.key === key).length };
     }
-    // Pre-flight gate: only for a fresh start the user initiated (queued jobs
-    // re-drained through startRun bypass this, as do user-confirmed forces).
-    if (!opts.bypassPreflight && this.opts.preflightPct > 0 && this.opts.readWindow) {
-      const w = await this.checkWindow(session.engine);
-      if (w && w.usedPercent >= this.opts.preflightPct) {
-        return { status: 'limit-blocked', usedPercent: w.usedPercent, resetsAt: w.resetsAt };
+    // Pre-flight gates run only for a fresh start the user initiated (queued jobs
+    // re-drained through startRun bypass these, as do user-confirmed forces).
+    // Order: memory → disk → egress (Resource Guard) → subscription window.
+    if (!opts.bypassPreflight) {
+      const blocked = await this.checkResources();
+      if (blocked) return blocked;
+
+      if (this.opts.preflightPct > 0 && this.opts.readWindow) {
+        const w = await this.checkWindow(session.engine);
+        if (w && w.usedPercent >= this.opts.preflightPct) {
+          return { status: 'limit-blocked', usedPercent: w.usedPercent, resetsAt: w.resetsAt };
+        }
       }
     }
     this.startRun(session, prompt);
     return { status: 'started' };
+  }
+
+  /**
+   * Read the three resource signals (cached 30s) and grade them against the
+   * configured limits, in order: memory (hard) → disk (hard) → egress (confirm).
+   * Every signal fails open — a null collector result skips its gate. Returns
+   * the blocking SubmitResult, or null when nothing blocks / guard is disabled.
+   */
+  private async checkResources(): Promise<SubmitResult | null> {
+    const r = this.opts.resource;
+    if (!r || !r.enabled) return null;
+
+    const now = Date.now();
+    if (!this.resourceCache || now - this.resourceCache.at >= RESOURCE_CACHE_MS) {
+      const [mem, disk, egress] = await Promise.all([
+        r.readMemory().catch(() => null),
+        r.readDisk(r.diskPath).catch(() => null),
+        r.readEgress().catch(() => null),
+      ]);
+      this.resourceCache = { at: now, mem, disk, egress };
+    }
+    const { mem, disk, egress } = this.resourceCache;
+
+    if (mem) {
+      const freeCombined = mem.availableMb + (mem.swapFreeMb ?? 0);
+      if (freeCombined < r.minFreeMemMb) {
+        return { status: 'resource-blocked', reason: 'memory', detail: String(Math.round(freeCombined)) };
+      }
+    }
+    if (disk && disk.usedPct >= r.diskBlockPct) {
+      return { status: 'resource-blocked', reason: 'disk', detail: String(disk.usedPct) };
+    }
+    if (egress && r.egressFreeMb > 0) {
+      const usedPct = (egress.monthTxMb / r.egressFreeMb) * 100;
+      if (usedPct >= r.egressWarnPct) {
+        return {
+          status: 'egress-blocked',
+          usedMb: Math.round(egress.monthTxMb),
+          freeMb: r.egressFreeMb,
+          usedPct: Math.round(usedPct),
+        };
+      }
+    }
+    return null;
   }
 
   /**

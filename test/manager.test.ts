@@ -378,3 +378,198 @@ describe('SessionManager · Token Guard', () => {
     });
   });
 });
+
+describe('SessionManager · Resource Guard', () => {
+  type ResourceOpts = NonNullable<
+    ConstructorParameters<typeof SessionManager>[3]['resource']
+  >;
+
+  /** Healthy defaults — override just the collector under test. */
+  function resourceOpts(overrides: Partial<ResourceOpts> = {}): ResourceOpts {
+    return {
+      enabled: true,
+      diskPath: dir,
+      minFreeMemMb: 300,
+      diskBlockPct: 95,
+      egressFreeMb: 1024,
+      egressWarnPct: 80,
+      readMemory: async () => ({
+        availableMb: 800,
+        totalMb: 1000,
+        swapFreeMb: 2000,
+        swapTotalMb: 3000,
+      }),
+      readDisk: async () => ({ freeGb: 20, totalGb: 30, usedPct: 40 }),
+      readEgress: async () => ({ monthTxMb: 100 }),
+      ...overrides,
+    };
+  }
+
+  function makeManager(engine: MockEngine, resource: ResourceOpts | undefined) {
+    const reporter = new NullReporter();
+    const manager = new SessionManager(store, { claude: engine, codex: engine }, () => reporter, {
+      logsDir: dir,
+      maxConcurrentRuns: 3,
+      defaultModels: {},
+      guard: { softTokens: 0, hardTokens: 0, maxSteps: 0 },
+      preflightPct: 0,
+      resource,
+    });
+    return manager;
+  }
+
+  it('hard-blocks a start when free memory (available + swap free) is below the floor', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        readMemory: async () => ({
+          availableMb: 100,
+          totalMb: 1000,
+          swapFreeMb: 50,
+          swapTotalMb: 3000,
+        }),
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res).toEqual({ status: 'resource-blocked', reason: 'memory', detail: '150' });
+    expect(engine.seen).toHaveLength(0);
+  });
+
+  it('hard-blocks a start when the disk is at/over the block threshold', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({ readDisk: async () => ({ freeGb: 1, totalGb: 30, usedPct: 96 }) }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res).toEqual({ status: 'resource-blocked', reason: 'disk', detail: '96' });
+    expect(engine.seen).toHaveLength(0);
+  });
+
+  it('asks to confirm (egress-blocked) when egress crosses the warn percent, and a force bypasses it', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({ readEgress: async () => ({ monthTxMb: 900 }) }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    // 900 / 1024 = 87.9% ≥ 80
+    expect(res).toEqual({ status: 'egress-blocked', usedMb: 900, freeMb: 1024, usedPct: 88 });
+    expect(engine.seen).toHaveLength(0);
+
+    const forced = await manager.submitPrompt(session, 'go', { bypassPreflight: true });
+    expect(forced.status).toBe('started');
+    engine.release(okRun('s'));
+    await waitUntil(() => store.get(-1, 1)?.status === 'idle');
+  });
+
+  it('applies the gates in order: memory (hard) beats egress (confirm)', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        readMemory: async () => ({ availableMb: 50, totalMb: 1000, swapFreeMb: 0, swapTotalMb: 0 }),
+        readEgress: async () => ({ monthTxMb: 5000 }),
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res.status).toBe('resource-blocked');
+  });
+
+  it('RESOURCE_GUARD=off skips every resource gate', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        enabled: false,
+        readMemory: async () => ({ availableMb: 1, totalMb: 1000, swapFreeMb: 0, swapTotalMb: 0 }),
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res.status).toBe('started');
+    engine.release(okRun('s'));
+    await waitUntil(() => store.get(-1, 1)?.status === 'idle');
+  });
+
+  it('fails open (proceeds) when every collector returns null', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        readMemory: async () => null,
+        readDisk: async () => null,
+        readEgress: async () => null,
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res.status).toBe('started');
+    engine.release(okRun('s'));
+    await waitUntil(() => store.get(-1, 1)?.status === 'idle');
+  });
+
+  it('fails open when a collector throws', async () => {
+    const engine = new MockEngine();
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        readMemory: async () => {
+          throw new Error('collector blew up');
+        },
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const res = await manager.submitPrompt(session, 'go');
+    expect(res.status).toBe('started');
+    engine.release(okRun('s'));
+    await waitUntil(() => store.get(-1, 1)?.status === 'idle');
+  });
+
+  it('caches resource reads for 30s (both submits share one read of each collector)', async () => {
+    const engine = new MockEngine();
+    let memReads = 0;
+    let egressReads = 0;
+    const manager = makeManager(
+      engine,
+      resourceOpts({
+        readMemory: async () => {
+          memReads++;
+          return { availableMb: 800, totalMb: 1000, swapFreeMb: 2000, swapTotalMb: 3000 };
+        },
+        readEgress: async () => {
+          egressReads++;
+          return { monthTxMb: 900 }; // blocks so no run is ever started
+        },
+      }),
+    );
+    const session = makeSession(1);
+    await store.upsert(session);
+
+    const r1 = await manager.submitPrompt(session, 'go');
+    const r2 = await manager.submitPrompt(session, 'go again');
+    expect(r1.status).toBe('egress-blocked');
+    expect(r2.status).toBe('egress-blocked');
+    expect(memReads).toBe(1);
+    expect(egressReads).toBe(1);
+  });
+});

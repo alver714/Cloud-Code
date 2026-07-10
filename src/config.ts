@@ -40,6 +40,17 @@ const EnvSchema = z.object({
     emptyToUndefined,
     z.coerce.number().min(0).max(100).default(90),
   ),
+  // Resource Guard — держит бот в пределах Always Free tier (e2-micro).
+  // 'off' отключает предстартовые проверки, но /usage всё равно показывает, что может.
+  RESOURCE_GUARD: z.preprocess(emptyToUndefined, z.enum(['on', 'off']).default('on')),
+  // Бесплатный исходящий трафик в месяц (МБ) и порог предупреждения (%).
+  EGRESS_FREE_MB: z.preprocess(emptyToUndefined, z.coerce.number().min(0).default(1024)),
+  EGRESS_WARN_PCT: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100).default(80)),
+  // Ниже этого объёма свободной памяти (MemAvailable + SwapFree, МБ) новые запуски не стартуют.
+  MIN_FREE_MEM_MB: z.preprocess(emptyToUndefined, z.coerce.number().min(0).default(300)),
+  // Порог предупреждения и жёсткой блокировки по заполненности диска (%).
+  DISK_WARN_PCT: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100).default(85)),
+  DISK_BLOCK_PCT: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100).default(95)),
 });
 
 export interface Config {
@@ -57,6 +68,12 @@ export interface Config {
   guardHardTokens: number;
   guardMaxSteps: number;
   guardPreflightPct: number;
+  resourceGuard: boolean;
+  egressFreeMb: number;
+  egressWarnPct: number;
+  minFreeMemMb: number;
+  diskWarnPct: number;
+  diskBlockPct: number;
 }
 
 export function expandHome(p: string): string {
@@ -100,5 +117,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     guardHardTokens: e.GUARD_HARD_TOKENS,
     guardMaxSteps: e.GUARD_MAX_STEPS,
     guardPreflightPct: e.GUARD_PREFLIGHT_PCT,
+    resourceGuard: e.RESOURCE_GUARD === 'on',
+    egressFreeMb: e.EGRESS_FREE_MB,
+    egressWarnPct: e.EGRESS_WARN_PCT,
+    minFreeMemMb: e.MIN_FREE_MEM_MB,
+    diskWarnPct: e.DISK_WARN_PCT,
+    diskBlockPct: e.DISK_BLOCK_PCT,
   };
 }
