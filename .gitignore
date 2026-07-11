@@ -1,5 +1,6 @@
 node_modules/
 dist/
+VERSION
 *.log
 .DS_Store
 sessions.json

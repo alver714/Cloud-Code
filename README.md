@@ -125,6 +125,21 @@ Updating the code:
 ./deploy/04-deploy.sh
 ```
 
+`04-deploy.sh` also bakes the deployed commit SHA into `/opt/coding-bot/VERSION`, which the in-bot updater uses (below).
+
+### In-bot updates (`/update`)
+
+You can update the running bot straight from Telegram, without SSH:
+
+- `/update check` — reports the current vs. latest `main` SHA (from the public GitHub repo) without changing anything.
+- `/update` — clones the latest `main` into a temp dir, runs `npm ci` + `npm run build` there, and only after a **verified build** swaps the new `dist/` into `/opt/coding-bot`, syncs prod deps, and restarts. The restart is delegated to systemd (`Restart=always`) — the bot just exits and is relaunched into the new code (the hardened unit can't `sudo systemctl`). `/update` refuses while any run is active (the self-exit would kill it).
+
+Safety: if a build fails, the running bot is left completely untouched. The previous build is kept at `/opt/coding-bot/dist.bak`, so a crash-looping new version can be rolled back over SSH:
+
+```bash
+cd /opt/coding-bot && cp -r dist.bak dist && sudo systemctl restart coding-bot
+```
+
 Service logs:
 
 ```bash
@@ -168,6 +183,7 @@ Raw JSONL engine logs are stored in `~/logs/session-*.jsonl`.
 | `/diff` | current git diff |
 | `/sessions` | all sessions with their statuses |
 | `/cleanup` | remove unused workspaces |
+| `/update [check]` | update the bot itself from GitHub (build + swap + restart); `check` only compares versions |
 | `/help` | short help with examples; `/help all` — full catalog |
 
 A regular message in a topic is sent to the agent as a prompt. Unknown slash commands are also passed through to the engine, so custom Claude Code commands like the ones under `.claude/commands` work too.

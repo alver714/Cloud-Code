@@ -50,6 +50,7 @@ export const BOT_COMMANDS = [
   { command: 'ci', description: 'Status of the latest CI run' },
   { command: 'usage', description: 'Subscription limits + bot spend + VM state' },
   { command: 'cleanup', description: 'Remove unused workspaces' },
+  { command: 'update', description: 'Update the bot from GitHub + restart (check)' },
   { command: 'budget', description: 'Token limit per run: 500k|off|default' },
   { command: 'verbose', description: 'Verbose mode: on|off' },
   { command: 'compact', description: 'Compact the conversation into a summary' },

@@ -36,6 +36,14 @@ import {
 } from '../system/cleanup.js';
 import { latestRun } from '../system/ci.js';
 import { parsePreviewArgs, PreviewManager } from '../system/preview.js';
+import {
+  computeUpdateCheck,
+  getCurrentVersion,
+  getLatestVersion,
+  isUnderSystemd,
+  runUpdate,
+  shortSha,
+} from '../system/selfupdate.js';
 import { sessionKey } from '../sessions/types.js';
 import { readResourceStatus, type ResourceStatus } from '../system/resources.js';
 import type { DayTotals, UsageAccounting } from '../usage/accounting.js';
@@ -212,6 +220,7 @@ export const HELP_FULL = `📚 <b>All Cloud Code commands</b>
 
 <b>System</b>
 /usage — subscription limits + bot usage + server
+/update [check] — pull the latest bot code from GitHub, build, and restart
 /cleanup — delete unused workspaces
 /memory — show the repository's instructions file (CLAUDE.md / AGENTS.md)
 /memories — the bot's durable memory across sessions (separate from /memory)
@@ -1612,6 +1621,81 @@ export function registerCommands(bot: Bot, deps: BotDeps): void {
         .catch(() => reply(ctx, text).catch(() => undefined));
     } else {
       await reply(ctx, text).catch(() => undefined);
+    }
+  });
+
+  // High-privilege owner op (already gated by the allowlist middleware): pull the
+  // latest bot code from GitHub, build it in an isolated temp dir, swap it into
+  // the live install, and restart. `/update check` just reports current vs latest.
+  bot.command('update', async (ctx) => {
+    const arg = ctx.match.trim().toLowerCase();
+
+    if (arg === 'check') {
+      const note = await reply(ctx, '🔎 Checking for a new version…').catch(() => undefined);
+      const [current, latest] = await Promise.all([getCurrentVersion(), getLatestVersion()]);
+      const check = computeUpdateCheck(current, latest);
+      let text: string;
+      if (check.state === 'unknown-latest') {
+        text = "❓ Couldn't reach GitHub to check the latest version — try again later.";
+      } else if (check.state === 'up-to-date') {
+        text = `✅ Up to date (<code>${shortSha(check.latest)}</code>).`;
+      } else {
+        text = `⬆️ Update available: <code>${shortSha(check.current)}</code> → <code>${shortSha(
+          check.latest,
+        )}</code> — run /update`;
+      }
+      if (ctx.chat && note) {
+        await ctx.api
+          .editMessageText(ctx.chat.id, note.message_id, text, { parse_mode: 'HTML' })
+          .catch(() => reply(ctx, text).catch(() => undefined));
+      } else {
+        await reply(ctx, text).catch(() => undefined);
+      }
+      return;
+    }
+
+    if (arg) {
+      await reply(
+        ctx,
+        'Usage: <code>/update</code> (pull + build + restart) or <code>/update check</code>.',
+      );
+      return;
+    }
+
+    // A successful update self-exits to restart — that would kill any active run.
+    if (manager.activeCount() > 0) {
+      await reply(ctx, '⏳ A run is in progress; /stop it or wait, then /update.');
+      return;
+    }
+
+    await reply(ctx, '⏳ Updating: fetching + building the latest… (the bot will restart)');
+    const res = await runUpdate({
+      chatId: ctx.chat?.id,
+      topicId: getTopicId(ctx),
+      now: Date.now(),
+    });
+    if (!res.ok) {
+      await reply(
+        ctx,
+        `❌ Update failed (the running bot is untouched):\n<pre>${truncateHtml(
+          escapeHtml(res.tail),
+          1500,
+        )}</pre>`,
+      );
+      return;
+    }
+    if (isUnderSystemd()) {
+      await reply(
+        ctx,
+        `✅ Built <code>${shortSha(res.from)}</code>→<code>${shortSha(res.to)}</code>. Restarting…`,
+      );
+      // systemd's Restart=always relaunches us into the new code — no sudo needed.
+      process.exit(0);
+    } else {
+      await reply(
+        ctx,
+        `✅ Built <code>${shortSha(res.to)}</code>. Restart the bot to apply (npm run dev / your process manager).`,
+      );
     }
   });
 

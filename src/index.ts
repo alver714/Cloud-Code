@@ -20,6 +20,7 @@ import { readDisk, readEgress, readMemory } from './system/resources.js';
 import { UsageAccounting } from './usage/accounting.js';
 import { readClaudeLimits, readCodexLimits } from './usage/limits.js';
 import { createBot, setupBot, BOT_COMMANDS } from './bot/bot.js';
+import { consumeUpdateMarker, shortSha } from './system/selfupdate.js';
 import { TopicStreamer } from './bot/streamer.js';
 import { truncate } from './bot/format.js';
 import { sanitizedChildEnv } from './util/childEnv.js';
@@ -223,6 +224,7 @@ async function main(): Promise<void> {
   });
 
   await recoverAfterRestart(store, bot.api);
+  await announceUpdate(bot.api);
 
   const shutdown = async (signal: string) => {
     console.log(`[main] ${signal} — stopping`);
@@ -288,6 +290,26 @@ async function recoverAfterRestart(store: SessionStore, api: Api): Promise<void>
     } catch (err) {
       console.error(`[recover] notify failed for topic ${s.topicId}:`, err);
     }
+  }
+}
+
+/**
+ * A prior /update staged a new build and self-exited to restart. If the marker
+ * left behind survived the restart, confirm success in the topic that issued it,
+ * then it's consumed (read+deleted) so we only report once. Fail-silent.
+ */
+async function announceUpdate(api: Api): Promise<void> {
+  const marker = await consumeUpdateMarker();
+  if (!marker || marker.chatId === undefined) return;
+  const prefix = marker.from ? `${shortSha(marker.from)}→` : '';
+  try {
+    await api.sendMessage(
+      marker.chatId,
+      `✅ Updated to ${prefix}${shortSha(marker.to)} and back online.`,
+      marker.topicId !== undefined ? { message_thread_id: marker.topicId } : {},
+    );
+  } catch (err) {
+    console.error('[update] confirmation failed:', err);
   }
 }
 

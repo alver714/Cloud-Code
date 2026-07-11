@@ -5,9 +5,12 @@ source deploy/env.sh
 
 echo "== local build =="
 npm run build
+# Bake the deployed commit SHA so /update can report current-vs-latest and the
+# post-restart confirmation knows where it came from.
+git rev-parse HEAD > VERSION
 
 echo "== upload → VM =="
-tar czf - dist package.json package-lock.json |
+tar czf - dist package.json package-lock.json VERSION |
   VSSH 'mkdir -p /opt/coding-bot && tar xzf - -C /opt/coding-bot &&
         cd /opt/coding-bot &&
         npm ci --omit=dev --no-audit --no-fund &&
