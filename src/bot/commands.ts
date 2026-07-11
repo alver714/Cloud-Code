@@ -128,6 +128,9 @@ function rememberRepos(key: string, repos: string[]): void {
 const cleanupCache = new Map<string, OrphanWorkspace[]>();
 const CLEANUP_CACHE_MAX = 50;
 
+// Telegram Bot API rejects local document uploads above 50 MB.
+const FILE_SEND_MAX_BYTES = 50 * 1024 * 1024;
+
 function rememberCleanup(key: string, orphans: OrphanWorkspace[]): void {
   cleanupCache.set(key, orphans);
   while (cleanupCache.size > CLEANUP_CACHE_MAX) {
@@ -205,6 +208,7 @@ export const HELP_FULL = `📚 <b>All Cloud Code commands</b>
 /status — session state + git status
 /commit &lt;message&gt; — stage all changes and create a local commit
 /diff — current git diff
+/file &lt;path&gt; — send a file from the workspace as a document
 
 <b>System</b>
 /usage — subscription limits + bot usage + server
@@ -1879,6 +1883,40 @@ export function registerCommands(bot: Bot, deps: BotDeps): void {
     } catch (err) {
       await reply(ctx, `❌ git diff failed:\n<pre>${truncateHtml(escapeHtml(String(err)), 800)}</pre>`);
     }
+  });
+
+  bot.command('file', async (ctx) => {
+    const s = requireSession(ctx, deps);
+    if (!s) return;
+    const arg = ctx.match.trim();
+    if (!arg) {
+      await reply(ctx, 'Format: <code>/file &lt;path&gt;</code> — sends a file from the workspace as a document (path relative to the repo root).');
+      return;
+    }
+    const resolved = path.resolve(s.workdir, arg);
+    if (resolved !== s.workdir && !resolved.startsWith(s.workdir + path.sep)) {
+      await reply(ctx, '❌ Path is outside the workspace.');
+      return;
+    }
+    let stat;
+    try {
+      stat = await fs.stat(resolved);
+    } catch {
+      await reply(ctx, `❌ Not found: <code>${escapeHtml(arg)}</code>`);
+      return;
+    }
+    if (stat.isDirectory()) {
+      await reply(ctx, '❌ That is a directory — give me a file path.');
+      return;
+    }
+    if (stat.size > FILE_SEND_MAX_BYTES) {
+      await reply(ctx, `❌ File is too large to send (${humanBytes(stat.size)}, limit ${humanBytes(FILE_SEND_MAX_BYTES)}).`);
+      return;
+    }
+    await ctx.replyWithDocument(new InputFile(resolved), {
+      message_thread_id: getTopicId(ctx),
+      disable_notification: true,
+    });
   });
 
   bot.command('commit', async (ctx) => {
